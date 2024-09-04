@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extração de Comentários do YouTube</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.0.6/wordcloud2.min.js"></script>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #1c1c1e;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .container {
+            max-width: 700px;
+            width: 100%;
+            background-color: #2c2c2e;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2em;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #ffcc00;
+            border-bottom: 2px solid #ffcc00;
+            display: inline-block;
+            padding-bottom: 10px;
+        }
+
+        label {
+            font-size: 1.2em;
+            font-weight: 500;
+            color: #e0e0e0;
+            margin-top: 20px;
+            display: block;
+            text-align: left;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 15px;
+            margin-top: 10px;
+            margin-bottom: 20px;
+            font-size: 1em;
+            border-radius: 8px;
+            border: none;
+            background-color: #3a3a3c;
+            color: #fff;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.2em;
+            font-weight: 600;
+            border-radius: 8px;
+            border: none;
+            background-color: #ffcc00;
+            color: #1c1c1e;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #ffb800;
+        }
+
+        .progress-bar {
+            width: 100%;
+            background-color: #3a3a3c;
+            margin-top: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .progress-bar-fill {
+            height: 20px;
+            background-color: #ffcc00;
+            width: 0;
+            transition: width 0.4s ease;
+        }
+
+        .status {
+            font-size: 1.2em;
+            margin-top: 20px;
+            font-weight: 500;
+        }
+
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #444;
+            border-radius: 8px;
+            color: #aaffaa;
+            font-weight: 500;
+        }
+
+        iframe {
+            border-radius: 15px;
+            margin-top: 20px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        canvas {
+            margin-top: 20px;
+            width: 100%;
+            height: 400px;
+            border: 1px solid #ffcc00;
+            border-radius: 8px;
+            background-color: #2c2c2e;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Extração de Comentários do YouTube</h1>
+
+    <center><iframe width="560" height="315" src="https://www.youtube-nocookie.com/embed/r55_hiiN520?si=zNGLXHt3l8_A2Gnv&amp;start=58" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></center><br><br>
+
+    <label for="api-key">Chave da API:</label>
+    <input type="text" id="api-key" placeholder="Insira sua chave da API">
+
+    <label for="youtube-url">URL do Vídeo:</label>
+    <input type="text" id="youtube-url" placeholder="Insira a URL do vídeo do YouTube">
+
+    <button onclick="startExtraction()">Extrair Comentários</button>
+
+    <div class="progress-bar">
+        <div class="progress-bar-fill"></div>
+    </div>
+    <div class="status">Total de comentários extraídos: 0</div>
+
+    <div class="result"></div>
+
+    <!-- Canvas para a nuvem de palavras -->
+    <canvas id="wordCloudCanvas"></canvas>
+</div>
+
+<script>
+    async function startExtraction() {
+        const apiKey = document.getElementById('api-key').value;
+        const youtubeUrl = document.getElementById('youtube-url').value;
+
+        if (!apiKey || !youtubeUrl) {
+            alert("Por favor, preencha todos os campos.");
+            return;
+        }
+
+        const videoId = extractVideoId(youtubeUrl);
+        if (!videoId) {
+            alert("URL do vídeo do YouTube inválida!");
+            return;
+        }
+
+        const comments = await getComments(apiKey, videoId);
+        saveCommentsAsExcel(comments, videoId);
+        generateWordCloud(comments); // Gera a nuvem de palavras após a extração
+    }
+
+    function extractVideoId(url) {
+        const urlObj = new URL(url);
+        if (urlObj.hostname === 'youtu.be') {
+            return urlObj.pathname.slice(1);
+        }
+        if (urlObj.hostname.includes('youtube.com')) {
+            return urlObj.searchParams.get('v');
+        }
+        return null;
+    }
+
+    async function getComments(apiKey, videoId) {
+        let comments = [];
+        let nextPageToken = null;
+        const url = `https://www.googleapis.com/youtube/v3/commentThreads?part=snippet,replies&videoId=${videoId}&key=${apiKey}&maxResults=100`;
+
+        try {
+            do {
+                const response = await fetch(nextPageToken ? `${url}&pageToken=${nextPageToken}` : url);
+                const data = await response.json();
+                nextPageToken = data.nextPageToken;
+                data.items.forEach(item => {
+                    comments.push({
+                        Author: item.snippet.topLevelComment.snippet.authorDisplayName,
+                        Text: item.snippet.topLevelComment.snippet.textDisplay,
+                        'Published At': item.snippet.topLevelComment.snippet.publishedAt,
+                        Likes: item.snippet.topLevelComment.snippet.likeCount,
+                        Type: 'Top-Level'
+                    });
+                    if (item.replies) {
+                        item.replies.comments.forEach(reply => {
+                            comments.push({
+                                Author: reply.snippet.authorDisplayName,
+                                Text: reply.snippet.textDisplay,
+                                'Published At': reply.snippet.publishedAt,
+                                Likes: reply.snippet.likeCount,
+                                Type: 'Reply'
+                            });
+                        });
+                    }
+                });
+                updateProgress(comments.length);
+            } while (nextPageToken);
+        } catch (error) {
+            alert("Erro ao extrair comentários: " + error.message);
+        }
+        return comments;
+    }
+
+    function updateProgress(count) {
+        const progressFill = document.querySelector('.progress-bar-fill');
+        const status = document.querySelector('.status');
+        progressFill.style.width = `${(count / 1000) * 100}%`;
+        status.innerText = `Total de comentários extraídos: ${count}`;
+    }
+
+    function saveCommentsAsExcel(comments, videoId) {
+        const ws = XLSX.utils.json_to_sheet(comments);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Comentários");
+
+        const currentDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+        const fileName = `comentarios---${currentDate}---${videoId}.
+        const fileName = `comentarios---${currentDate}---${videoId}.xlsx`;
+
+        XLSX.writeFile(wb, fileName);
+        document.querySelector('.result').innerText = `Comentários salvos com sucesso como ${fileName} na pasta de downloads.`;
+    }
+
+    // Função para gerar a nuvem de palavras a partir dos comentários extraídos
+    function generateWordCloud(comments) {
+        const canvas = document.getElementById('wordCloudCanvas');
+
+        // Filtrar e limpar o texto dos comentários
+        const commentTexts = comments.map(comment => comment.Text).join(' ');
+        const cleanedWords = cleanText(commentTexts);
+
+        // Contar a frequência das palavras
+        const wordCount = {};
+        cleanedWords.forEach(word => {
+            if (wordCount[word]) {
+                wordCount[word]++;
+            } else {
+                wordCount[word] = 1;
+            }
+        });
+
+        // Preparar os dados para o WordCloud
+        const wordArray = Object.keys(wordCount).map(word => [word, wordCount[word]]);
+
+        // Gerar a nuvem de palavras usando WordCloud2.js
+        WordCloud(canvas, {
+            list: wordArray,
+            gridSize: 20,
+            weightFactor: function (size) {
+                return size * 15;  // Ajustar para um melhor equilíbrio entre as palavras
+            },
+            fontFamily: 'Arial, sans-serif',  // Definir uma fonte mais legível
+            color: function () {
+                return 'hsl(' + Math.random() * 360 + ', 100%, 50%)';  // Cores vibrantes
+            },
+            rotateRatio: 0.2,  // Menos rotação para facilitar a leitura
+            rotationSteps: 1,
+            backgroundColor: '#2c2c2e',  // Fundo compatível com o design
+            shape: 'circle'  // Forma circular para a nuvem de palavras
+        });
+    }
+
+    // Função para limpar e filtrar as palavras do texto
+    function cleanText(text) {
+        const stopwords = ['de', 'a', 'o', 'que', 'e', 'do', 'da', 'em', 'um', 'para', 'com', 'não', 'uma', 'os', 'no', 'se', 'na', 'por', 'mais', 'as', 'dos', 'como', 'mas', 'foi', 'ao', 'ele', 'tem', 'à', 'seu', 'sua', 'ou', 'quando', 'muito', 'há', 'nos', 'já', 'está', 'eu', 'também', 'só', 'pelo', 'pela', 'até', 'isso', 'ela', 'entre', 'era', 'sem', 'mesmo', 'ter', 'seus', 'quem', 'me', 'esse', 'eles', 'estão', 'você', 'tinha', 'foram', 'essa'];
+        text = text.toLowerCase();  // Transformar tudo para minúsculo
+        text = text.replace(/[^\w\s]/gi, '');  // Remover caracteres especiais
+        const words = text.split(/\s+/);  // Dividir o texto em palavras
+        return words.filter(word => isNaN(word) && !stopwords.includes(word));  // Filtrar números e stopwords
+    }
+</script>
+
+</body>
+</html>
